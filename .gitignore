@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc
+.dedupe_test/
+.tmp.driveupload/
+prospector_seen.json
+*.csv
+*.xlsx
+*.xls
+*.gsheet
+*.png
+*.jpg
+*.jpeg
+*.webp
+PROSPECTOS LISTOS PARA CONTACTAR/
+tarjetas on/
+antigravity-sdk-python/
+prospector-scrapling/
