@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import xlsx from 'xlsx';
 
+const SEEN_FILE = path.join(process.cwd(), 'prospector_seen.json');
+
 function getArg(name, fallback = '') {
   const index = process.argv.indexOf(`--${name}`);
   if (index === -1 || index + 1 >= process.argv.length) return fallback;
@@ -32,6 +34,147 @@ function parseCsv(filepath) {
     headers.forEach((h, i) => { obj[h] = values[i] || 'sin datos'; });
     return obj;
   });
+}
+
+function normalizeTextKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function cleanPhoneKey(value) {
+  return String(value || '').replace(/[^0-9]/g, '');
+}
+
+function getPhoneKey(lead) {
+  const whatsapp = String(lead.whatsapp_link || lead.posible_whatsapp_url || '');
+  const whatsappMatch = whatsapp.match(/wa\.me\/(\d+)/i);
+  if (whatsappMatch) return whatsappMatch[1];
+  return cleanPhoneKey(lead.telefono);
+}
+
+function normalizeMapsUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw === 'sin datos') return '';
+
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    url.search = '';
+    return url.toString().replace(/\/$/, '').toLowerCase();
+  } catch (e) {
+    return raw.split('?')[0].split('#')[0].replace(/\/$/, '').toLowerCase();
+  }
+}
+
+function getLeadKeys(lead) {
+  const nombre = normalizeTextKey(lead.nombre);
+  const direccion = normalizeTextKey(lead.direccion);
+  return {
+    phone: getPhoneKey(lead),
+    mapsUrl: normalizeMapsUrl(lead.mapsUrl || lead.maps_url),
+    nameAddress: nombre && direccion ? `${nombre}__${direccion}` : ''
+  };
+}
+
+function emptySeen() {
+  return {
+    version: 1,
+    updatedAt: null,
+    leads: []
+  };
+}
+
+function loadSeen() {
+  if (!fs.existsSync(SEEN_FILE)) return emptySeen();
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf-8'));
+    if (!parsed || !Array.isArray(parsed.leads)) {
+      throw new Error('Formato invalido: falta arreglo "leads".');
+    }
+    return parsed;
+  } catch (error) {
+    console.error(`Error leyendo historial local ${SEEN_FILE}: ${error.message}`);
+    console.error('No se exporto nada para evitar perder o corromper el historial.');
+    process.exit(1);
+  }
+}
+
+function buildSeenIndexes(seen) {
+  const indexes = {
+    phones: new Set(),
+    mapsUrls: new Set(),
+    nameAddresses: new Set()
+  };
+
+  for (const item of seen.leads) {
+    if (item.phone) indexes.phones.add(item.phone);
+    if (item.mapsUrl) indexes.mapsUrls.add(item.mapsUrl);
+    if (item.nameAddress) indexes.nameAddresses.add(item.nameAddress);
+  }
+
+  return indexes;
+}
+
+function isDuplicateByKeys(keys, indexes) {
+  return Boolean(
+    (keys.phone && indexes.phones.has(keys.phone)) ||
+    (keys.mapsUrl && indexes.mapsUrls.has(keys.mapsUrl)) ||
+    (keys.nameAddress && indexes.nameAddresses.has(keys.nameAddress))
+  );
+}
+
+function addKeysToIndexes(keys, indexes) {
+  if (keys.phone) indexes.phones.add(keys.phone);
+  if (keys.mapsUrl) indexes.mapsUrls.add(keys.mapsUrl);
+  if (keys.nameAddress) indexes.nameAddresses.add(keys.nameAddress);
+}
+
+function splitNewAndDuplicateLeads(leads, seen) {
+  const indexes = buildSeenIndexes(seen);
+  const nuevos = [];
+  const duplicados = [];
+
+  for (const lead of leads) {
+    const keys = getLeadKeys(lead);
+    if (isDuplicateByKeys(keys, indexes)) {
+      duplicados.push(lead);
+      continue;
+    }
+
+    nuevos.push(lead);
+    addKeysToIndexes(keys, indexes);
+  }
+
+  return { nuevos, duplicados };
+}
+
+function updateSeenWithNewLeads(seen, leads) {
+  const indexes = buildSeenIndexes(seen);
+
+  for (const lead of leads) {
+    const keys = getLeadKeys(lead);
+    if (!keys.phone && !keys.mapsUrl && !keys.nameAddress) continue;
+    if (isDuplicateByKeys(keys, indexes)) continue;
+
+    seen.leads.push({
+      ...keys,
+      nombre: lead.nombre || 'sin datos',
+      direccion: lead.direccion || 'sin datos',
+      addedAt: new Date().toISOString()
+    });
+    addKeysToIndexes(keys, indexes);
+  }
+
+  seen.version = 1;
+  seen.updatedAt = new Date().toISOString();
+  fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2), 'utf-8');
+  return seen.leads.length;
 }
 
 function normalizarFugasFotos(texto) {
@@ -346,15 +489,31 @@ async function main() {
   const raw = parseCsv(inputFile);
   console.log(`Leads crudos: ${raw.length}`);
 
-  const processed = processLeads(raw);
+  const seen = loadSeen();
+  const { nuevos, duplicados } = splitNewAndDuplicateLeads(raw, seen);
+
+  const processed = processLeads(nuevos);
+  const duplicateProcessed = processLeads(duplicados);
 
   const base = inputFile.replace('.csv', '');
   const csvOut = `${base}_contacto_manual.csv`;
   const xlsxOut = `${base}_contacto_manual.xlsx`;
+  const dupOut = `${base}_duplicados.csv`;
 
   writeCsv(processed, csvOut);
   writeXlsx(processed, xlsxOut);
+  writeCsv(duplicateProcessed, dupOut);
+
+  const totalHistorico = updateSeenWithNewLeads(seen, nuevos);
+
   printResumen(processed);
+
+  console.log('\n=== HISTORIAL LOCAL ===');
+  console.log(`Leads crudos: ${raw.length}`);
+  console.log(`Nuevos exportados: ${nuevos.length}`);
+  console.log(`Duplicados contra historico: ${duplicados.length}`);
+  console.log(`Total historico actualizado: ${totalHistorico}`);
+  console.log(`Archivo duplicados: ${dupOut}`);
 
   console.log('\nListo. Abre el XLSX para contactar.');
 }
