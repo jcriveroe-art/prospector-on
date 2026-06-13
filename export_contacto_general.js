@@ -36,7 +36,21 @@ function parseCsv(filepath) {
   });
 }
 
+function normalizeText(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 function normalizeTextKey(value) {
+  return normalizeText(value);
+}
+
+function normalizeZoneToken(value) {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -44,6 +58,114 @@ function normalizeTextKey(value) {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+function rowSearchText(row) {
+  return normalizeText([
+    row.nombre,
+    row.categoria,
+    row.direccion,
+    row.mapsUrl,
+    row.maps_url,
+    row.website,
+    row.descripcion
+  ].filter(Boolean).join(' '));
+}
+
+function hasPostalCodeInRange(text, from, to) {
+  const matches = text.match(/\b\d{5}\b/g) || [];
+  return matches.some((cp) => {
+    const value = Number.parseInt(cp, 10);
+    return value >= from && value <= to;
+  });
+}
+
+function inferZonaFromText(row) {
+  const text = rowSearchText(row);
+
+  if (
+    text.includes('atizapan') ||
+    text.includes('atizapan de zaragoza') ||
+    text.includes('ciudad lopez mateos') ||
+    text.includes('cdad lopez mateos') ||
+    hasPostalCodeInRange(text, 52900, 52999)
+  ) {
+    return 'atizapan';
+  }
+
+  if (
+    text.includes('naucalpan') ||
+    text.includes('satelite') ||
+    text.includes('echegaray') ||
+    text.includes('lomas verdes') ||
+    hasPostalCodeInRange(text, 53100, 53599)
+  ) {
+    return 'naucalpan/satelite';
+  }
+
+  if (
+    text.includes('tlalnepantla') ||
+    hasPostalCodeInRange(text, 54000, 54199)
+  ) {
+    return 'tlalnepantla';
+  }
+
+  if (
+    text.includes('azcapotzalco') ||
+    text.includes('gustavo a madero') ||
+    text.includes('cdmx') ||
+    text.includes('ciudad de mexico')
+  ) {
+    return 'cdmx';
+  }
+
+  return '';
+}
+
+function getTargetZone(inputFile) {
+  return normalizeZoneToken(getArg('zona') || path.basename(inputFile, path.extname(inputFile)));
+}
+
+function isLeadInTargetZone(row, targetZone) {
+  const inferred = inferZonaFromText(row);
+  if (!inferred) return { inZone: true, uncertain: true, inferred };
+
+  if (targetZone.includes('atizapan')) {
+    return { inZone: inferred === 'atizapan', uncertain: false, inferred };
+  }
+
+  if (targetZone.includes('naucalpan') || targetZone.includes('satelite')) {
+    return { inZone: inferred === 'naucalpan/satelite', uncertain: false, inferred };
+  }
+
+  if (targetZone.includes('tlalnepantla')) {
+    return { inZone: inferred === 'tlalnepantla', uncertain: false, inferred };
+  }
+
+  if (targetZone.includes('cdmx') || targetZone.includes('ciudad de mexico')) {
+    return { inZone: inferred === 'cdmx', uncertain: false, inferred };
+  }
+
+  return { inZone: true, uncertain: true, inferred };
+}
+
+function splitByTargetZone(leads, targetZone) {
+  const enZona = [];
+  const fueraZona = [];
+  const zonaIncierta = [];
+
+  for (const lead of leads) {
+    const result = isLeadInTargetZone(lead, targetZone);
+    if (result.uncertain) {
+      zonaIncierta.push(lead);
+    } else if (result.inZone) {
+      enZona.push(lead);
+    } else {
+      fueraZona.push(lead);
+    }
+  }
+
+  return { enZona, fueraZona, zonaIncierta };
 }
 
 function cleanPhoneKey(value) {
@@ -491,29 +613,42 @@ async function main() {
 
   const seen = loadSeen();
   const { nuevos, duplicados } = splitNewAndDuplicateLeads(raw, seen);
+  const targetZone = getTargetZone(inputFile);
+  const { enZona, fueraZona, zonaIncierta } = splitByTargetZone(nuevos, targetZone);
+  const nuevosParaContacto = [...enZona, ...zonaIncierta];
 
-  const processed = processLeads(nuevos);
+  const processed = processLeads(nuevosParaContacto);
   const duplicateProcessed = processLeads(duplicados);
+  const fueraZonaProcessed = processLeads(fueraZona);
 
   const base = inputFile.replace('.csv', '');
   const csvOut = `${base}_contacto_manual.csv`;
   const xlsxOut = `${base}_contacto_manual.xlsx`;
   const dupOut = `${base}_duplicados.csv`;
+  const fueraZonaOut = `${base}_fuera_zona.csv`;
 
   writeCsv(processed, csvOut);
   writeXlsx(processed, xlsxOut);
   writeCsv(duplicateProcessed, dupOut);
+  if (fueraZonaProcessed.length > 0) {
+    writeCsv(fueraZonaProcessed, fueraZonaOut);
+  }
 
-  const totalHistorico = updateSeenWithNewLeads(seen, nuevos);
+  const totalHistorico = updateSeenWithNewLeads(seen, nuevosParaContacto);
 
   printResumen(processed);
 
   console.log('\n=== HISTORIAL LOCAL ===');
   console.log(`Leads crudos: ${raw.length}`);
-  console.log(`Nuevos exportados: ${nuevos.length}`);
+  console.log(`Leads despues de dedupe historico: ${nuevos.length}`);
+  console.log(`Leads en zona: ${enZona.length}`);
+  console.log(`Leads fuera de zona: ${fueraZona.length}`);
+  console.log(`Leads con zona incierta: ${zonaIncierta.length}`);
+  console.log(`Nuevos exportados: ${nuevosParaContacto.length}`);
   console.log(`Duplicados contra historico: ${duplicados.length}`);
   console.log(`Total historico actualizado: ${totalHistorico}`);
   console.log(`Archivo duplicados: ${dupOut}`);
+  console.log(`Archivo fuera de zona: ${fueraZonaProcessed.length > 0 ? fueraZonaOut : 'no generado'}`);
 
   console.log('\nListo. Abre el XLSX para contactar.');
 }
