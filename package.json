@@ -1,0 +1,27 @@
+{
+  "name": "prospector-on",
+  "version": "1.0.0",
+  "description": "MVP de prospección automatizada en Google Maps para vender Tarjeta ON",
+  "main": "prospector_mvp.js",
+  "type": "module",
+  "scripts": {
+    "start": "node prospector_mvp.js",
+    "export-chatgpt": "node export_for_chatgpt.js",
+    "export-whatsapp": "node export_whatsapp_ready.js",
+    "barberias": "node prospector_barberias.js",
+    "export-chatgpt-barberias": "node export_for_chatgpt_barberias.js",
+    "export-contacto-barberias": "node export_contacto_barberias.js",
+    "podologia": "node prospector_podologia.js",
+    "export-contacto-podologia": "node export_contacto_podologia.js",
+    "prospectar": "node prospector_general.js",
+    "export-contacto": "node export_contacto_general.js",
+    "prospeccion": "node prospeccion.js",
+    "preparar-crm": "node preparar_crm.cjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "openai": "^4.38.5",
+    "playwright": "^1.43.1",
+    "xlsx": "^0.18.5"
+  }
+}

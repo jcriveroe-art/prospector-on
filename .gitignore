@@ -19,3 +19,8 @@ PROSPECTOS LISTOS PARA CONTACTAR/
 tarjetas on/
 antigravity-sdk-python/
 prospector-scrapling/
+
+.lote_test/
+.zone_test/
+.zone_micro_test/
+*.log
