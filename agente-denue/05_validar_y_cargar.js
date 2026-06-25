@@ -14,8 +14,8 @@ const TEMPLATE_NAME = 'diagnostico_on_inicial';
 const LANGUAGE_CODE = 'es_MX';
 
 // Archivo de progreso para poder reanudar
-const PROGRESO_PATH = path.join(process.cwd(), 'agente-denue', 'output', '_progreso_lote_50.json');
-const REPORTE_PATH = path.join(process.cwd(), 'agente-denue', 'output', 'reporte_lote_50.json');
+const PROGRESO_PATH = path.join(process.cwd(), 'agente-denue', 'output', '_progreso_validacion_bcs.json');
+const REPORTE_PATH = path.join(process.cwd(), 'agente-denue', 'output', 'reporte_bcs.json');
 
 // Delay entre mensajes para no quemar el número (1.5 minutos = 90000 ms)
 const DELAY_MS = 90000;
@@ -108,15 +108,15 @@ async function main() {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  // Leer lote_50_seleccionado.json
-  const jsonPath = path.join(process.cwd(), 'agente-denue', 'output', 'lote_50_seleccionado.json');
+  // Leer enmaps.json
+  const jsonPath = path.join(process.cwd(), 'agente-denue', 'output', 'enmaps.json');
   if (!fs.existsSync(jsonPath)) {
-    console.error('❌ No se encontró lote_50_seleccionado.json');
+    console.error('❌ No se encontró enmaps.json');
     process.exit(1);
   }
 
   const businesses = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-  console.log(`📋 Total en lote_50_seleccionado.json: ${businesses.length}`);
+  console.log(`📋 Total en enmaps.json: ${businesses.length}`);
 
   // Cargar progreso previo
   let progreso = { ultimoIdx: -1, validos: 0, invalidos: 0, omitidos: 0, insertados: 0 };
