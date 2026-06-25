@@ -46,15 +46,12 @@ function slugify(text) {
   return normalizeMunicipio(text).replace(/\s+/g, '_');
 }
 
-function normalizeMunicipio(m) {
-  if (!m) return '';
-  return m
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, '')
-    .trim();
-}
+const normalizeMunicipio = s => s
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^\x00-\x7F]/g, '')
+  .toLowerCase()
+  .trim();
 
 function normalizeName(str) {
   if (!str) return '';
